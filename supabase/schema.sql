@@ -298,8 +298,24 @@ alter table public.purchase_orders enable row level security;
 alter table public.sync_runs       enable row level security;
 alter table public.audit_log       enable row level security;
 
--- visitantes sem login não têm acesso a nada
-revoke all on all tables in schema public from anon;
+-- ============================ PERMISSÕES (GRANTS) ============================
+-- Projetos novos do Supabase não expõem tabelas à API automaticamente.
+-- Concedemos o MÍNIMO por tabela; dentro disso, o RLS decide linha a linha por perfil.
+revoke all on all tables in schema public from anon, authenticated;   -- visitante sem login: nada
+grant usage on schema public to authenticated, service_role;
+
+grant select, insert, update, delete on public.stores, public.suppliers, public.products, public.purchase_orders to authenticated;
+grant select, insert, delete on public.movements to authenticated;     -- sem UPDATE: movimentação é imutável
+grant select, update on public.profiles, public.app_settings to authenticated;
+grant select on public.sync_runs, public.audit_log to authenticated;  -- auditoria: só leitura
+
+-- service_role = sincronização UpSeller no GitHub Actions (nunca vai para o site)
+grant all on all tables in schema public to service_role;
+grant usage, select on all sequences in schema public to service_role;
+
+-- funções auxiliares das políticas: só para logados
+revoke execute on function public.app_role(), public.mfa_ok(), public.can_read(), public.has_cap(text) from public, anon;
+grant execute on function public.app_role(), public.mfa_ok(), public.can_read(), public.has_cap(text) to authenticated, service_role;
 
 -- remove políticas antigas para recriar
 do $$
