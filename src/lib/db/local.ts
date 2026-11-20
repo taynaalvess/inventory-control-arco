@@ -1,20 +1,34 @@
 import { get, set } from 'idb-keyval';
-import type { Dataset, Movement, Product, Store } from '../types';
-import { stockFromMovements, type DataSource } from './source';
+import { upgradeDataset, type Dataset } from '../types';
+import { applyMovements, stockFromMovements, type DataSource } from './source';
 
-const K = { products: 'arco.products', stores: 'arco.stores', movements: 'arco.movements' };
+const K = {
+  products: 'arco.products',
+  stores: 'arco.stores',
+  movements: 'arco.movements',
+  suppliers: 'arco.suppliers',
+  purchases: 'arco.purchases',
+} as const;
 
 async function read(): Promise<Dataset> {
-  const [products, stores, movements] = await Promise.all([
-    get<Product[]>(K.products),
-    get<Store[]>(K.stores),
-    get<Movement[]>(K.movements),
+  const [products, stores, movements, suppliers, purchases] = await Promise.all([
+    get(K.products),
+    get(K.stores),
+    get(K.movements),
+    get(K.suppliers),
+    get(K.purchases),
   ]);
-  return { products: products ?? [], stores: stores ?? [], movements: movements ?? [] };
+  return upgradeDataset({ products, stores, movements, suppliers, purchases });
 }
 
 export function readLocalDataset() {
   return read();
+}
+
+async function upsert<T extends { id: string }>(key: string, current: T[], rows: T[], merge?: (prev: T | undefined, next: T) => T) {
+  const map = new Map(current.map((r) => [r.id, r]));
+  for (const r of rows) map.set(r.id, merge ? merge(map.get(r.id), r) : r);
+  await set(key, [...map.values()]);
 }
 
 export function createLocalSource(): DataSource {
@@ -24,9 +38,8 @@ export function createLocalSource(): DataSource {
 
     async upsertProducts(ps) {
       const { products } = await read();
-      const map = new Map(products.map((p) => [p.id, p]));
-      for (const p of ps) map.set(p.id, { ...p, stock: map.get(p.id)?.stock ?? 0 });
-      await set(K.products, [...map.values()]);
+      // saldo e custo médio nunca vêm do formulário: preservamos o que está salvo
+      await upsert(K.products, products, ps, (prev, p) => ({ ...p, stock: prev?.stock ?? 0 }));
     },
 
     async deleteProduct(id) {
@@ -36,10 +49,7 @@ export function createLocalSource(): DataSource {
     },
 
     async upsertStores(ss) {
-      const { stores } = await read();
-      const map = new Map(stores.map((s) => [s.id, s]));
-      for (const s of ss) map.set(s.id, s);
-      await set(K.stores, [...map.values()]);
+      await upsert(K.stores, (await read()).stores, ss);
     },
 
     async deleteStore(id) {
@@ -48,20 +58,36 @@ export function createLocalSource(): DataSource {
       await set(K.movements, d.movements.map((m) => (m.storeId === id ? { ...m, storeId: null } : m)));
     },
 
+    async upsertSuppliers(ss) {
+      await upsert(K.suppliers, (await read()).suppliers, ss);
+    },
+
+    async deleteSupplier(id) {
+      const d = await read();
+      await set(K.suppliers, d.suppliers.filter((s) => s.id !== id));
+      await set(K.products, d.products.map((p) => (p.supplierId === id ? { ...p, supplierId: '' } : p)));
+    },
+
+    async upsertPurchases(ps) {
+      await upsert(K.purchases, (await read()).purchases, ps);
+    },
+
+    async deletePurchase(id) {
+      const d = await read();
+      await set(K.purchases, d.purchases.filter((p) => p.id !== id));
+    },
+
     async addMovements(ms) {
       const d = await read();
-      const deltas = stockFromMovements(ms);
-      const now = new Date().toISOString();
-      const products = d.products.map((p) =>
-        deltas.has(p.id) ? { ...p, stock: p.stock + (deltas.get(p.id) ?? 0), updatedAt: now } : p,
-      );
-      await set(K.products, products);
+      await set(K.products, applyMovements(d.products, ms));
       await set(K.movements, [...d.movements, ...ms]);
     },
 
     async replaceAll(data) {
       const stock = stockFromMovements(data.movements);
       await set(K.stores, data.stores);
+      await set(K.suppliers, data.suppliers);
+      await set(K.purchases, data.purchases);
       await set(K.products, data.products.map((p) => ({ ...p, stock: stock.get(p.id) ?? 0 })));
       await set(K.movements, data.movements);
     },

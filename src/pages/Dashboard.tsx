@@ -15,7 +15,7 @@ const PERIODS = [
 ];
 
 export default function Dashboard() {
-  const { products, stores, movements } = useStore();
+  const { products, stores, movements, can } = useStore();
   const [days, setDays] = useState(30);
   const [storeId, setStoreId] = useState('');
   const m = useMemo(() => computeMetrics(products, stores, movements, { days, storeId: storeId || null }), [products, stores, movements, days, storeId]);
@@ -31,9 +31,11 @@ export default function Dashboard() {
             text="Cadastre produtos, importe a planilha do UpSeller ou carregue dados de demonstração para ver o painel funcionando."
             action={
               <>
-                <Link to="/integracoes" className="bg-brand inline-flex h-10 items-center rounded-xl px-4 text-sm font-medium text-white">
-                  Importar do UpSeller
-                </Link>
+                {can('manage') && (
+                  <Link to="/integracoes" className="bg-brand inline-flex h-10 items-center rounded-xl px-4 text-sm font-medium text-white">
+                    Importar do UpSeller
+                  </Link>
+                )}
                 <Link to="/produtos" className="inline-flex h-10 items-center rounded-xl border border-line px-4 text-sm font-medium hover:bg-hover">
                   Cadastrar produto
                 </Link>
@@ -74,7 +76,7 @@ export default function Dashboard() {
         <Kpi label="Faturamento" value={compactBrl(m.revenue)} change={delta(m.revenue, m.prevRevenue)} hint="vs. período anterior" icon={<DollarSign size={16} />} />
         <Kpi label="Pedidos" value={num(m.orders)} hint={`${num(m.units)} unidades`} change={delta(m.units, m.prevUnits)} icon={<ShoppingCart size={16} />} tone="blue" />
         <Kpi label="Ticket médio" value={brl(m.ticket)} icon={<Receipt size={16} />} tone="green" />
-        <Kpi label="Margem bruta" value={pct(m.grossMargin)} hint="preço − custo" icon={<Percent size={16} />} tone="amber" />
+        <Kpi label="Lucro líquido" value={compactBrl(m.netProfit)} hint={`margem bruta ${pct(m.grossMargin)} · taxas ${compactBrl(m.fees)}`} icon={<Percent size={16} />} tone={m.netProfit < 0 ? 'red' : 'amber'} />
         <Kpi label="Valor em estoque (custo)" value={compactBrl(m.stockValue)} hint={`${compactBrl(m.retailValue)} a preço de venda`} icon={<Boxes size={16} />} />
         <Kpi label="Unidades em estoque" value={num(m.totalUnits)} hint={`${m.activeSkus} SKUs ativos`} icon={<Package size={16} />} tone="blue" />
         <Kpi label="Abaixo do mínimo" value={m.lowStock.length} hint="precisam de reposição" icon={<AlertTriangle size={16} />} tone="amber" />
@@ -236,7 +238,9 @@ export default function Dashboard() {
                   <th className="text-right">Pedidos</th>
                   <th className="text-right">Unidades</th>
                   <th className="text-right">Ticket médio</th>
-                  <th className="text-right">Margem</th>
+                  <th className="text-right">Taxas</th>
+                  <th className="text-right">Lucro líquido</th>
+                  <th className="text-right">Margem líq.</th>
                   <th>Mais vendido</th>
                 </tr>
               </thead>
@@ -253,7 +257,9 @@ export default function Dashboard() {
                     <td className="text-right tabular-nums">{num(s.orders)}</td>
                     <td className="text-right tabular-nums">{num(s.units)}</td>
                     <td className="text-right tabular-nums">{brl(s.ticket)}</td>
-                    <td className="text-right tabular-nums">{pct(s.margin)}</td>
+                    <td className="text-right tabular-nums">{brl(s.fees)}</td>
+                    <td className={`text-right tabular-nums ${s.netProfit < 0 ? 'text-rose-600' : ''}`}>{brl(s.netProfit)}</td>
+                    <td className="text-right tabular-nums">{pct(s.netMargin)}</td>
                     <td className="max-w-48 truncate">{s.topProduct?.name ?? '—'}</td>
                   </tr>
                 ))}

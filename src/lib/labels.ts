@@ -42,7 +42,10 @@ export function printLabels(items: { product: Product; copies: number }[], showP
     .f { width: 100%; display: flex; justify-content: space-between; font-size: 8pt; }
     @media print { .l { border-color: transparent; } .hint { display: none; } }
     .hint { padding: 8px; font-size: 12px; color: #555; }
-  </style></head><body><div class="hint">Dica: ajuste o tamanho da etiqueta para sua impressora (ex.: 60×32mm). Ctrl+P para imprimir.</div><div class="g">${labels.join('')}</div>
-  <script>window.onload = () => setTimeout(() => window.print(), 300)<\/script></body></html>`);
+  </style></head><body><div class="hint">Dica: ajuste o tamanho da etiqueta para sua impressora (ex.: 60×32mm). Ctrl+P para imprimir.</div><div class="g">${labels.join('')}</div></body></html>`);
   w.document.close();
+  setTimeout(() => {
+    w.focus();
+    w.print();
+  }, 400);
 }

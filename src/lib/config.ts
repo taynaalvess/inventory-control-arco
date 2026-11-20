@@ -10,34 +10,27 @@ const KEY = 'arco.config';
 const envUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined) ?? '';
 const envKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ?? '';
 
-/** Quando o build recebe as variáveis do Supabase (GitHub Actions), o app já nasce em modo nuvem. */
+/**
+ * Quando o build recebe as variáveis do Supabase (GitHub Actions), o site fica TRAVADO no modo nuvem:
+ * não existe modo local nem como apontar para outro banco — sempre exige login.
+ */
 export const hasEnvSupabase = Boolean(envUrl && envKey);
 
-const defaults: AppConfig = {
-  mode: hasEnvSupabase ? 'supabase' : 'local',
-  supabaseUrl: envUrl,
-  supabaseKey: envKey,
-};
+const envConfig: AppConfig = { mode: 'supabase', supabaseUrl: envUrl, supabaseKey: envKey };
 
 export function loadConfig(): AppConfig {
+  if (hasEnvSupabase) return envConfig;
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) {
-      const saved = JSON.parse(raw) as Partial<AppConfig>;
-      return {
-        ...defaults,
-        ...saved,
-        supabaseUrl: saved.supabaseUrl || defaults.supabaseUrl,
-        supabaseKey: saved.supabaseKey || defaults.supabaseKey,
-      };
-    }
+    if (raw) return { mode: 'local', supabaseUrl: '', supabaseKey: '', ...(JSON.parse(raw) as Partial<AppConfig>) };
   } catch {
     /* armazenamento indisponível */
   }
-  return defaults;
+  return { mode: 'local', supabaseUrl: '', supabaseKey: '' };
 }
 
 export function saveConfig(c: AppConfig) {
+  if (hasEnvSupabase) return;
   try {
     localStorage.setItem(KEY, JSON.stringify(c));
   } catch {

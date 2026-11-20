@@ -2,19 +2,36 @@ import { useMemo, useState } from 'react';
 import { useStore } from '../lib/store';
 import { norm } from '../lib/format';
 import type { Product } from '../lib/types';
-import { Input, cx } from './ui';
+import { Input } from './ui';
 
 /** Busca de produto por nome, SKU ou EAN (aceita bipagem). */
-export function ProductPicker({ value, onChange }: { value: Product | null; onChange: (p: Product | null) => void }) {
+export function ProductPicker({
+  value,
+  onChange,
+  filter,
+  placeholder = 'Buscar ou bipar produto…',
+}: {
+  value: Product | null;
+  onChange: (p: Product | null) => void;
+  filter?: (p: Product) => boolean;
+  placeholder?: string;
+}) {
   const { products, findByCode } = useStore();
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
 
+  const pool = useMemo(() => (filter ? products.filter(filter) : products), [products, filter]);
   const results = useMemo(() => {
     const t = norm(q);
-    if (!t) return products.slice(0, 8);
-    return products.filter((p) => norm(`${p.name} ${p.sku} ${p.ean}`).includes(t)).slice(0, 8);
-  }, [q, products]);
+    if (!t) return pool.slice(0, 8);
+    return pool.filter((p) => norm(`${p.name} ${p.sku} ${p.ean}`).includes(t)).slice(0, 8);
+  }, [q, pool]);
+
+  const pick = (p: Product) => {
+    onChange(p);
+    setQ('');
+    setOpen(false);
+  };
 
   if (value)
     return (
@@ -32,7 +49,7 @@ export function ProductPicker({ value, onChange }: { value: Product | null; onCh
     <div className="relative">
       <Input
         value={q}
-        placeholder="Buscar ou bipar produto…"
+        placeholder={placeholder}
         onChange={(e) => {
           setQ(e.target.value);
           setOpen(true);
@@ -42,8 +59,9 @@ export function ProductPicker({ value, onChange }: { value: Product | null; onCh
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
             e.preventDefault();
-            const hit = findByCode(q) ?? results[0];
-            if (hit) onChange(hit);
+            const code = findByCode(q);
+            const hit = code && (!filter || filter(code)) ? code : results[0];
+            if (hit) pick(hit);
           }
         }}
       />
@@ -53,12 +71,12 @@ export function ProductPicker({ value, onChange }: { value: Product | null; onCh
             <button
               type="button"
               key={p.id}
-              className={cx('flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-hover')}
-              onMouseDown={() => onChange(p)}
+              className="flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-hover"
+              onMouseDown={() => pick(p)}
             >
               <span className="truncate">{p.name}</span>
               <span className="text-faint shrink-0 text-xs">
-                {p.sku} · {p.stock} un
+                {p.sku} {!p.isKit && `· ${p.stock} un`}
               </span>
             </button>
           ))}

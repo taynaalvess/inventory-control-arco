@@ -12,6 +12,9 @@ export interface StoreStat {
   ticket: number;
   share: number;
   margin: number;
+  fees: number;
+  netProfit: number;
+  netMargin: number;
   topProduct: Product | null;
 }
 
@@ -37,6 +40,8 @@ export interface Metrics {
   orders: number;
   ticket: number;
   grossMargin: number;
+  fees: number;
+  netProfit: number;
   stockValue: number;
   retailValue: number;
   totalUnits: number;
@@ -94,7 +99,8 @@ export function computeMetrics(
     const time = t.getTime();
     const isSale = m.type === 'venda' || m.type === 'devolucao';
 
-    if (m.type === 'venda') {
+    // consumo: vendas diretas + componentes baixados por venda de kit
+    if ((m.type === 'venda' && m.affectsStock) || (m.type === 'venda' && !pmap.get(m.productId)?.isKit) || (m.type === 'saida' && m.source === 'kit')) {
       if (time > (lastSale.get(m.productId) ?? 0)) lastSale.set(m.productId, time);
       if (t >= last30) sold30.set(m.productId, (sold30.get(m.productId) ?? 0) + Math.abs(m.qty));
     }
@@ -102,7 +108,7 @@ export function computeMetrics(
     if (opts.storeId && m.storeId !== opts.storeId) continue;
 
     if (!isSale) {
-      if (t >= from && m.affectsStock) {
+      if (t >= from && m.affectsStock && m.source !== 'kit') {
         if (m.qty > 0) entries += m.qty;
         else exits += -m.qty;
       }
@@ -148,7 +154,7 @@ export function computeMetrics(
   }
 
   // ----- estoque (independe do filtro de loja)
-  const active = products.filter((p) => p.active);
+  const active = products.filter((p) => p.active && !p.isKit);
   let stockValue = 0,
     retailValue = 0,
     totalUnits = 0;
@@ -178,7 +184,7 @@ export function computeMetrics(
     abcCount[abc]++;
     return { ...r, abc };
   });
-  abcCount.C += active.length - ranked.length;
+  abcCount.C += Math.max(0, active.length - ranked.filter((r) => !r.product.isKit).length);
 
   // ----- cobertura: quantos dias o estoque dura no ritmo dos últimos 30 dias
   const coverage: CoverageStat[] = active
@@ -198,6 +204,8 @@ export function computeMetrics(
     .map(([sid, v]) => {
       const st = smap.get(sid);
       const topId = [...v.prod.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+      const fees = v.revenue * ((st?.commissionPct ?? 0) / 100) + v.orders.size * (st?.fixedFee ?? 0);
+      const netProfit = v.revenue - v.cogs - fees;
       return {
         storeId: sid,
         name: st?.name ?? 'Sem loja',
@@ -209,10 +217,15 @@ export function computeMetrics(
         ticket: v.orders.size ? v.revenue / v.orders.size : 0,
         share: revenue ? v.revenue / revenue : 0,
         margin: v.revenue ? (v.revenue - v.cogs) / v.revenue : 0,
+        fees,
+        netProfit,
+        netMargin: v.revenue ? netProfit / v.revenue : 0,
         topProduct: topId ? pmap.get(topId) ?? null : null,
       };
     })
     .sort((a, b) => b.revenue - a.revenue);
+
+  const fees = byStore.reduce((acc, x) => acc + x.fees, 0);
 
   return {
     from,
@@ -223,6 +236,8 @@ export function computeMetrics(
     orders: orders.size,
     ticket: orders.size ? revenue / orders.size : 0,
     grossMargin: revenue ? (revenue - cogs) / revenue : 0,
+    fees,
+    netProfit: revenue - cogs - fees,
     stockValue,
     retailValue,
     totalUnits,
@@ -245,4 +260,34 @@ export const NO_STORE_KEY = NO_STORE;
 export function delta(cur: number, prev: number) {
   if (!prev) return null;
   return (cur - prev) / Math.abs(prev);
+}
+
+/** Consumo médio diário (vendas + baixas por kit) nos últimos N dias. */
+export function dailyConsumption(movements: Movement[], products: Product[], days = 30) {
+  const since = startOfDay(addDays(new Date(), -(days - 1))).getTime();
+  const kits = new Set(products.filter((p) => p.isKit).map((p) => p.id));
+  const map = new Map<string, number>();
+  for (const m of movements) {
+    if (new Date(m.createdAt).getTime() < since) continue;
+    const counts = (m.type === 'venda' && !kits.has(m.productId)) || (m.type === 'saida' && m.source === 'kit');
+    if (counts) map.set(m.productId, (map.get(m.productId) ?? 0) + Math.abs(m.qty));
+  }
+  for (const [k, v] of map) map.set(k, v / days);
+  return map;
+}
+
+/** Faturamento do mês corrente por loja (para metas). */
+export function monthRevenueByStore(movements: Movement[], products: Product[]) {
+  const start = new Date();
+  start.setDate(1);
+  start.setHours(0, 0, 0, 0);
+  const pmap = new Map(products.map((p) => [p.id, p]));
+  const map = new Map<string, number>();
+  for (const m of movements) {
+    if (!m.storeId || (m.type !== 'venda' && m.type !== 'devolucao')) continue;
+    if (new Date(m.createdAt) < start) continue;
+    const sign = m.type === 'venda' ? 1 : -1;
+    map.set(m.storeId, (map.get(m.storeId) ?? 0) + sign * Math.abs(m.qty) * (m.unitPrice ?? pmap.get(m.productId)?.price ?? 0));
+  }
+  return map;
 }

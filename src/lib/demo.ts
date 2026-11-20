@@ -1,6 +1,6 @@
 import { addDays, uid } from './format';
-import { blankProduct, buildMovement } from './store';
-import type { Dataset, Movement, Product, Store } from './types';
+import { blankProduct, blankStore, buildMovement, expandKits, type NewMovement } from './store';
+import { CHANNEL_DEFAULT_FEES, type Dataset, type Movement, type Product, type Purchase, type Store, type Supplier } from './types';
 
 const CATALOG: [string, string, number, number][] = [
   ['Fone Bluetooth TWS Pro', 'Áudio', 39.9, 119.9],
@@ -31,17 +31,24 @@ function ean13(base: number) {
   return digits + ((10 - (sum % 10)) % 10);
 }
 
-/** Dados fictícios para explorar o painel (90 dias de vendas em 4 lojas). */
+/** Dados fictícios para explorar o painel: 90 dias de vendas em 4 lojas, kits, fornecedores e compras. */
 export function generateDemo(): Dataset {
   const now = new Date();
   const created = addDays(now, -120).toISOString();
+  const mk = (name: string, channel: string, color: string, monthlyGoal: number) =>
+    blankStore({ name, channel, color, monthlyGoal, createdAt: created, ...(CHANNEL_DEFAULT_FEES[channel] ?? {}) });
   const stores: Store[] = [
-    { id: uid(), name: 'Shopee Arco', channel: 'Shopee', color: '#f97316', active: true, createdAt: created },
-    { id: uid(), name: 'Mercado Livre Arco', channel: 'Mercado Livre', color: '#eab308', active: true, createdAt: created },
-    { id: uid(), name: 'Amazon Arco', channel: 'Amazon', color: '#6366f1', active: true, createdAt: created },
-    { id: uid(), name: 'Loja física', channel: 'Loja física', color: '#10b981', active: true, createdAt: created },
+    mk('Shopee Arco', 'Shopee', '#f97316', 22000),
+    mk('Mercado Livre Arco', 'Mercado Livre', '#eab308', 18000),
+    mk('Amazon Arco', 'Amazon', '#6366f1', 8000),
+    mk('Loja física', 'Loja física', '#10b981', 5000),
   ];
   const weights = [0.42, 0.33, 0.15, 0.1];
+
+  const suppliers: Supplier[] = [
+    { id: uid(), name: 'Distribuidora Tech SP', document: '12.345.678/0001-90', contact: 'Carla', phone: '(11) 99999-0000', email: 'vendas@techsp.example', leadTimeDays: 7, notes: '', createdAt: created },
+    { id: uid(), name: 'Importadora Oriente', document: '98.765.432/0001-10', contact: 'Wei', phone: '(11) 98888-1111', email: 'compras@oriente.example', leadTimeDays: 25, notes: 'Pedido mínimo R$ 3.000', createdAt: created },
+  ];
 
   const products: Product[] = CATALOG.map(([name, category, cost, price], i) =>
     blankProduct({
@@ -54,18 +61,53 @@ export function generateDemo(): Dataset {
       price,
       minStock: 10 + (i % 4) * 5,
       location: `A${(i % 5) + 1}-P${(i % 3) + 1}`,
+      supplierId: suppliers[i % 3 === 0 ? 1 : 0].id,
       createdAt: created,
     }),
   );
 
-  const movements: Movement[] = [];
-  const popularity: number[] = products.map((_, i) => (i < 4 ? 3 : i < 10 ? 1.5 : i === 16 ? 0 : 0.6));
+  const byIdx = (i: number) => products[i];
+  const kits = [
+    blankProduct({
+      sku: 'KIT-HOME',
+      name: 'Kit Home Office (mouse + teclado + mousepad)',
+      category: 'Kits',
+      brand: 'Arco',
+      price: 249.9,
+      isKit: true,
+      kitItems: [
+        { productId: byIdx(11).id, qty: 1 },
+        { productId: byIdx(12).id, qty: 1 },
+        { productId: byIdx(19).id, qty: 1 },
+      ],
+      createdAt: created,
+    }),
+    blankProduct({
+      sku: 'KIT-CARGA',
+      name: 'Combo Carregador 25W + Cabo USB-C',
+      category: 'Kits',
+      brand: 'Arco',
+      price: 79.9,
+      isKit: true,
+      kitItems: [
+        { productId: byIdx(2).id, qty: 1 },
+        { productId: byIdx(3).id, qty: 1 },
+      ],
+      createdAt: created,
+    }),
+  ];
+  for (const k of kits) k.cost = k.kitItems.reduce((s, it) => s + (products.find((p) => p.id === it.productId)?.cost ?? 0), 0);
+  const all = [...products, ...kits];
+  const byId = new Map(all.map((p) => [p.id, p]));
 
+  const inputs: NewMovement[] = [];
   products.forEach((p) => {
-    movements.push(
-      buildMovement({ productId: p.id, type: 'entrada', qty: 50 + Math.round(Math.random() * 150), unitCost: p.cost, ref: 'NF-1001', note: 'Compra inicial', source: 'demo', createdAt: addDays(now, -95).toISOString() }),
-    );
+    inputs.push({ productId: p.id, type: 'entrada', qty: 50 + Math.round(Math.random() * 150), unitCost: p.cost, ref: 'NF-1001', note: 'Compra inicial', source: 'demo', createdAt: addDays(now, -95).toISOString() });
   });
+
+  const sellable = [...products, ...kits];
+  const popularity: number[] = sellable.map((p, i) => (p.isKit ? 1.2 : i < 4 ? 3 : i < 10 ? 1.5 : i === 16 ? 0 : 0.6));
+  const totalPop = popularity.reduce((a, b) => a + b, 0);
 
   let order = 5000;
   for (let d = 89; d >= 0; d--) {
@@ -80,22 +122,50 @@ export function generateDemo(): Dataset {
       const lines = Math.random() < 0.2 ? 2 : 1;
       order++;
       for (let l = 0; l < lines; l++) {
-        const totalPop = popularity.reduce((a, b) => a + b, 0);
         let pick = Math.random() * totalPop;
         const idx = popularity.findIndex((w) => (pick -= w) <= 0);
-        const p = products[Math.max(0, idx)];
+        const p = sellable[Math.max(0, idx)];
         const at = new Date(day);
         at.setHours(8 + Math.floor(Math.random() * 14), Math.floor(Math.random() * 60));
-        movements.push(
-          buildMovement({ productId: p.id, type: 'venda', qty: -(Math.random() < 0.15 ? 2 : 1), unitPrice: +(p.price * (0.9 + Math.random() * 0.1)).toFixed(2), unitCost: p.cost, storeId: store.id, ref: `PED-${order}`, source: 'demo', createdAt: at.toISOString() }),
-        );
+        inputs.push({ productId: p.id, type: 'venda', qty: -(Math.random() < 0.15 ? 2 : 1), unitPrice: +(p.price * (0.9 + Math.random() * 0.1)).toFixed(2), unitCost: p.cost, storeId: store.id, ref: `PED-${order}`, source: 'demo', createdAt: at.toISOString() });
       }
     }
     if (d === 45) {
       products.slice(0, 6).forEach((p) =>
-        movements.push(buildMovement({ productId: p.id, type: 'entrada', qty: 80, unitCost: p.cost, ref: 'NF-1002', note: 'Reposição', source: 'demo', createdAt: day.toISOString() })),
+        inputs.push({ productId: p.id, type: 'entrada', qty: 80, unitCost: +(p.cost * 1.05).toFixed(2), ref: 'PC-1001', note: 'Reposição', source: 'compra', createdAt: day.toISOString() }),
       );
     }
+    if (d === 20) {
+      inputs.push({ productId: products[5].id, type: 'ajuste', qty: -3, note: 'Inventário: avaria', source: 'bipagem', createdAt: day.toISOString() });
+    }
   }
-  return { products, stores, movements };
+
+  const movements: Movement[] = expandKits(inputs, byId).map(buildMovement);
+
+  const purchases: Purchase[] = [
+    {
+      id: uid(),
+      number: 'PC-1001',
+      supplierId: suppliers[0].id,
+      status: 'recebido',
+      items: products.slice(0, 6).map((p) => ({ productId: p.id, qty: 80, received: 80, unitCost: +(p.cost * 1.05).toFixed(2) })),
+      expectedAt: '',
+      notes: 'Reposição',
+      createdAt: addDays(now, -50).toISOString(),
+      updatedAt: addDays(now, -45).toISOString(),
+    },
+    {
+      id: uid(),
+      number: 'PC-1002',
+      supplierId: suppliers[1].id,
+      status: 'enviado',
+      items: [products[0], products[9], products[12]].map((p) => ({ productId: p.id, qty: 60, received: 0, unitCost: p.cost })),
+      expectedAt: addDays(now, 10).toISOString().slice(0, 10),
+      notes: '',
+      createdAt: addDays(now, -5).toISOString(),
+      updatedAt: addDays(now, -5).toISOString(),
+    },
+  ];
+
+  return { products: all, stores, movements, suppliers, purchases };
 }

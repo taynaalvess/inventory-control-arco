@@ -17,7 +17,7 @@ const TONE: Record<MovementType, 'green' | 'red' | 'violet' | 'amber' | 'blue'> 
 };
 
 export default function Movements() {
-  const { movements, productById, storeById, stores, addMovements } = useStore();
+  const { movements, productById, storeById, stores, addMovements, can } = useStore();
   const toast = useToast();
   const [q, setQ] = useState('');
   const [type, setType] = useState('');
@@ -90,9 +90,11 @@ export default function Movements() {
             <Button variant="secondary" onClick={exportCsv}>
               <Download size={16} /> Exportar
             </Button>
-            <Button onClick={() => setCreating(true)}>
-              <Plus size={16} /> Lançamento manual
-            </Button>
+            {can('scan') && (
+              <Button onClick={() => setCreating(true)}>
+                <Plus size={16} /> Lançamento manual
+              </Button>
+            )}
           </>
         }
       />
@@ -160,7 +162,7 @@ export default function Movements() {
                         {m.qty > 0 ? '+' : ''}
                         {m.qty}
                       </td>
-                      <td className="text-right tabular-nums">{m.unitPrice ? brl(Math.abs(m.qty) * m.unitPrice) : '—'}</td>
+                      <td className="text-right tabular-nums">{can('finance') && m.unitPrice ? brl(Math.abs(m.qty) * m.unitPrice) : '—'}</td>
                       <td className="whitespace-nowrap">
                         {st ? (
                           <span className="flex items-center gap-1.5">
@@ -174,9 +176,11 @@ export default function Movements() {
                       <td className="text-muted font-mono text-xs">{m.ref || '—'}</td>
                       <td className="text-muted text-xs">{SOURCE_LABEL[m.source]}</td>
                       <td>
-                        <button className="text-muted rounded-lg p-1.5 hover:bg-hover" onClick={() => reverse(m)} title="Estornar">
-                          <Undo2 size={15} />
-                        </button>
+                        {can('manage') && m.source !== 'kit' && (
+                          <button className="text-muted rounded-lg p-1.5 hover:bg-hover" onClick={() => reverse(m)} title="Estornar">
+                            <Undo2 size={15} />
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );

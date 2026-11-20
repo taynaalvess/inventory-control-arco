@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Download, Package, Pencil, Plus, Printer, Search, Tag, Trash2 } from 'lucide-react';
 import { useStore } from '../lib/store';
 import { brl, errMsg, norm } from '../lib/format';
@@ -13,7 +13,9 @@ import { useToast } from '../components/toast';
 type Filter = 'todos' | 'baixo' | 'zerado' | 'inativos';
 
 export default function Products() {
-  const { products, deleteProduct, movements } = useStore();
+  const { products, deleteProduct, movements, can, kitAvailable } = useStore();
+  const finance = can('finance');
+  const manage = can('manage');
   const toast = useToast();
   const [params] = useSearchParams();
   const [q, setQ] = useState('');
@@ -33,8 +35,8 @@ export default function Products() {
         if (filter === 'inativos') {
           if (p.active) return false;
         } else if (!p.active) return false;
-        if (filter === 'baixo' && !(p.stock <= 0 || (p.minStock > 0 && p.stock <= p.minStock))) return false;
-        if (filter === 'zerado' && p.stock > 0) return false;
+        if (filter === 'baixo' && (p.isKit || !(p.stock <= 0 || (p.minStock > 0 && p.stock <= p.minStock)))) return false;
+        if (filter === 'zerado' && (p.isKit || p.stock > 0)) return false;
         if (category && p.category !== category) return false;
         if (t && !norm(`${p.name} ${p.sku} ${p.ean} ${p.location} ${p.brand}`).includes(t)) return false;
         return true;
@@ -74,11 +76,12 @@ export default function Products() {
       { label: 'Categoria', get: (p) => p.category },
       { label: 'Marca', get: (p) => p.brand },
       { label: 'Localização', get: (p) => p.location },
-      { label: 'Custo', get: (p) => p.cost },
+      ...(finance ? [{ label: 'Custo', get: (p: Product) => p.cost }] : []),
       { label: 'Preço', get: (p) => p.price },
       { label: 'Estoque', get: (p) => p.stock },
       { label: 'Estoque mínimo', get: (p) => p.minStock },
-      { label: 'Valor em estoque', get: (p) => +(p.stock * p.cost).toFixed(2) },
+      ...(finance ? [{ label: 'Valor em estoque', get: (p: Product) => +(p.stock * p.cost).toFixed(2) }] : []),
+      { label: 'Kit', get: (p) => (p.isKit ? 'Sim' : 'Não') },
       { label: 'Ativo', get: (p) => (p.active ? 'Sim' : 'Não') },
     ]);
     download(`produtos-${stamp()}.csv`, csv);
@@ -107,9 +110,11 @@ export default function Products() {
             <Button variant="secondary" onClick={exportCsv}>
               <Download size={16} /> Exportar
             </Button>
-            <Button onClick={() => setCreating(true)}>
-              <Plus size={16} /> Novo produto
-            </Button>
+            {manage && (
+              <Button onClick={() => setCreating(true)}>
+                <Plus size={16} /> Novo produto
+              </Button>
+            )}
           </>
         }
       />
@@ -148,7 +153,7 @@ export default function Products() {
             icon={<Package size={36} />}
             title={products.length ? 'Nenhum produto encontrado' : 'Nenhum produto cadastrado'}
             text={products.length ? 'Ajuste a busca ou os filtros.' : 'Cadastre manualmente ou importe a planilha de produtos do UpSeller.'}
-            action={!products.length && <Button onClick={() => setCreating(true)}>Cadastrar produto</Button>}
+            action={!products.length && manage && <Button onClick={() => setCreating(true)}>Cadastrar produto</Button>}
           />
         ) : (
           <div className="overflow-x-auto">
@@ -168,7 +173,7 @@ export default function Products() {
                   <th>EAN</th>
                   <th>Categoria</th>
                   <th>Local</th>
-                  <th className="text-right">Custo</th>
+                  {finance && <th className="text-right">Custo</th>}
                   <th className="text-right">Preço</th>
                   <th className="text-right">Saldo</th>
                   <th className="text-right">Mín.</th>
@@ -182,20 +187,20 @@ export default function Products() {
                       <input type="checkbox" className="accent-brand" checked={selected.has(p.id)} onChange={() => toggle(p.id)} aria-label={`Selecionar ${p.name}`} />
                     </td>
                     <td className="max-w-72">
-                      <button className="block max-w-full truncate text-left font-medium hover:underline" onClick={() => setEditing(p)}>
+                      <Link to={`/produtos/${p.id}`} className="block max-w-full truncate font-medium hover:underline">
                         {p.name}
-                      </button>
+                      </Link>
                       <div className="text-faint flex items-center gap-1 text-xs">
-                        <Tag size={11} /> {p.sku} {!p.active && <Badge>inativo</Badge>}
+                        <Tag size={11} /> {p.sku} {p.isKit && <Badge tone="violet">kit</Badge>} {!p.active && <Badge>inativo</Badge>}
                       </div>
                     </td>
                     <td className="text-muted font-mono text-xs">{p.ean || '—'}</td>
                     <td className="text-muted">{p.category || '—'}</td>
                     <td className="text-muted">{p.location || '—'}</td>
-                    <td className="text-right tabular-nums">{brl(p.cost)}</td>
+                    {finance && <td className="text-right tabular-nums">{brl(p.cost)}</td>}
                     <td className="text-right tabular-nums">{brl(p.price)}</td>
                     <td className="text-right">
-                      <StockBadge stock={p.stock} min={p.minStock} />
+                      {p.isKit ? <Badge tone="violet" className="tabular-nums">{kitAvailable(p)} kits</Badge> : <StockBadge stock={p.stock} min={p.minStock} />}
                     </td>
                     <td className="text-muted text-right tabular-nums">{p.minStock || '—'}</td>
                     <td>
@@ -203,12 +208,16 @@ export default function Products() {
                         <button className="text-muted rounded-lg p-1.5 hover:bg-hover" onClick={() => printLabels([{ product: p, copies: 1 }])} title="Imprimir etiqueta">
                           <Printer size={15} />
                         </button>
-                        <button className="text-muted rounded-lg p-1.5 hover:bg-hover" onClick={() => setEditing(p)} title="Editar">
-                          <Pencil size={15} />
-                        </button>
-                        <button className="text-muted rounded-lg p-1.5 hover:bg-hover hover:text-rose-500" onClick={() => remove(p)} title="Excluir">
-                          <Trash2 size={15} />
-                        </button>
+                        {manage && (
+                          <button className="text-muted rounded-lg p-1.5 hover:bg-hover" onClick={() => setEditing(p)} title="Editar">
+                            <Pencil size={15} />
+                          </button>
+                        )}
+                        {can('admin') && (
+                          <button className="text-muted rounded-lg p-1.5 hover:bg-hover hover:text-rose-500" onClick={() => remove(p)} title="Excluir">
+                            <Trash2 size={15} />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

@@ -1,21 +1,27 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { Pencil, Plus, Store as StoreIcon, Trash2 } from 'lucide-react';
-import { useStore } from '../lib/store';
-import { computeMetrics } from '../lib/metrics';
-import { brl, compactBrl, errMsg, num, pct, shortDay, uid } from '../lib/format';
-import { CHANNELS, STORE_COLORS, type Store } from '../lib/types';
+import { Pencil, Plus, Store as StoreIcon, Target, Trash2 } from 'lucide-react';
+import { blankStore, useStore } from '../lib/store';
+import { computeMetrics, monthRevenueByStore } from '../lib/metrics';
+import { brl, compactBrl, errMsg, num, pct, shortDay } from '../lib/format';
+import { CHANNEL_DEFAULT_FEES, CHANNELS, STORE_COLORS, type Store } from '../lib/types';
 import { Badge, Button, Card, CardTitle, Empty, Field, Input, Modal, PageHeader, Segmented, Select, cx } from '../components/ui';
 import { useToast } from '../components/toast';
 
 export default function Stores() {
-  const { products, stores, movements, deleteStore } = useStore();
+  const { products, stores, movements, deleteStore, can } = useStore();
   const toast = useToast();
   const [days, setDays] = useState(30);
   const [editing, setEditing] = useState<Store | null>(null);
   const [creating, setCreating] = useState(false);
   const m = useMemo(() => computeMetrics(products, stores, movements, { days }), [products, stores, movements, days]);
+  const month = useMemo(() => monthRevenueByStore(movements, products), [movements, products]);
   const statById = new Map(m.byStore.map((s) => [s.storeId, s]));
+  const manage = can('manage');
+
+  const now = new Date();
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const monthElapsed = now.getDate() / daysInMonth;
 
   async function remove(s: Store) {
     if (!window.confirm(`Excluir a loja "${s.name}"? As vendas ficam no histórico como "sem loja".`)) return;
@@ -27,13 +33,13 @@ export default function Stores() {
     }
   }
 
-  const compare = m.byStore.map((s) => ({ name: s.name, Faturamento: s.revenue, color: s.color }));
+  const compare = m.byStore.map((s) => ({ name: s.name, Faturamento: s.revenue, Lucro: s.netProfit, color: s.color }));
 
   return (
     <>
       <PageHeader
         title="Lojas"
-        subtitle="Métricas por canal de venda"
+        subtitle="Faturamento, taxas, lucro líquido e metas por canal"
         actions={
           <>
             <Segmented
@@ -46,9 +52,11 @@ export default function Stores() {
                 { value: 365, label: '12m' },
               ]}
             />
-            <Button onClick={() => setCreating(true)}>
-              <Plus size={16} /> Nova loja
-            </Button>
+            {manage && (
+              <Button onClick={() => setCreating(true)}>
+                <Plus size={16} /> Nova loja
+              </Button>
+            )}
           </>
         }
       />
@@ -58,8 +66,8 @@ export default function Stores() {
           <Empty
             icon={<StoreIcon size={36} />}
             title="Nenhuma loja cadastrada"
-            text="Cadastre suas lojas (Shopee, Mercado Livre, Amazon, loja física…). Na importação de pedidos do UpSeller, as lojas são criadas automaticamente."
-            action={<Button onClick={() => setCreating(true)}>Cadastrar loja</Button>}
+            text="Cadastre suas lojas (Shopee, Mercado Livre, Amazon, loja física…). Na importação de pedidos do UpSeller, elas são criadas automaticamente."
+            action={manage && <Button onClick={() => setCreating(true)}>Cadastrar loja</Button>}
           />
         </Card>
       ) : (
@@ -68,6 +76,9 @@ export default function Stores() {
             {stores.map((s) => {
               const st = statById.get(s.id);
               const series = m.daily.map((d) => ({ date: d.date, v: (d[s.id] as number) ?? 0 }));
+              const mRev = month.get(s.id) ?? 0;
+              const goalPct = s.monthlyGoal ? mRev / s.monthlyGoal : 0;
+              const onTrack = goalPct >= monthElapsed;
               return (
                 <Card key={s.id} className={cx(!s.active && 'opacity-60')}>
                   <div className="mb-3 flex items-start justify-between gap-2">
@@ -78,30 +89,54 @@ export default function Stores() {
                       <div className="min-w-0">
                         <div className="truncate font-semibold">{s.name}</div>
                         <div className="text-faint text-xs">
-                          {s.channel} {!s.active && <Badge>inativa</Badge>}
+                          {s.channel} · {num(s.commissionPct, 1)}% + {brl(s.fixedFee)}/pedido {!s.active && <Badge>inativa</Badge>}
                         </div>
                       </div>
                     </div>
-                    <div className="flex shrink-0">
-                      <button className="text-muted rounded-lg p-1.5 hover:bg-hover" onClick={() => setEditing(s)} title="Editar">
-                        <Pencil size={15} />
-                      </button>
-                      <button className="text-muted rounded-lg p-1.5 hover:bg-hover hover:text-rose-500" onClick={() => remove(s)} title="Excluir">
-                        <Trash2 size={15} />
-                      </button>
-                    </div>
+                    {manage && (
+                      <div className="flex shrink-0">
+                        <button className="text-muted rounded-lg p-1.5 hover:bg-hover" onClick={() => setEditing(s)} title="Editar">
+                          <Pencil size={15} />
+                        </button>
+                        {can('admin') && (
+                          <button className="text-muted rounded-lg p-1.5 hover:bg-hover hover:text-rose-500" onClick={() => remove(s)} title="Excluir">
+                            <Trash2 size={15} />
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-2 gap-3 text-sm">
                     <Stat label="Faturamento" value={brl(st?.revenue ?? 0)} />
-                    <Stat label="Participação" value={pct(st?.share ?? 0)} />
+                    <Stat label="Lucro líquido" value={brl(st?.netProfit ?? 0)} tone={(st?.netProfit ?? 0) < 0 ? 'red' : undefined} />
                     <Stat label="Pedidos" value={num(st?.orders ?? 0)} />
                     <Stat label="Ticket médio" value={brl(st?.ticket ?? 0)} />
-                    <Stat label="Unidades" value={num(st?.units ?? 0)} />
-                    <Stat label="Margem bruta" value={pct(st?.margin ?? 0)} />
+                    <Stat label="Taxas pagas" value={brl(st?.fees ?? 0)} />
+                    <Stat label="Margem líquida" value={pct(st?.netMargin ?? 0)} />
                   </div>
 
-                  <div className="mt-3 h-16">
+                  {s.monthlyGoal > 0 && (
+                    <div className="mt-4">
+                      <div className="mb-1 flex items-center justify-between text-xs">
+                        <span className="text-muted inline-flex items-center gap-1">
+                          <Target size={12} /> Meta do mês
+                        </span>
+                        <span className={cx('font-medium', onTrack ? 'text-emerald-600' : 'text-amber-600')}>
+                          {pct(goalPct)} de {compactBrl(s.monthlyGoal)}
+                        </span>
+                      </div>
+                      <div className="relative h-2 overflow-hidden rounded-full bg-[var(--hover)]">
+                        <div className={cx('h-full rounded-full', onTrack ? 'bg-emerald-500' : 'bg-amber-500')} style={{ width: `${Math.min(100, goalPct * 100)}%` }} />
+                        <div className="absolute inset-y-0 w-0.5 bg-[var(--text)] opacity-40" style={{ left: `${monthElapsed * 100}%` }} title="Esperado até hoje" />
+                      </div>
+                      <p className="text-faint mt-1 text-xs">
+                        {onTrack ? 'No ritmo' : 'Abaixo do ritmo'} · projeção {compactBrl(monthElapsed ? mRev / monthElapsed : 0)}
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="mt-3 h-14">
                     <ResponsiveContainer>
                       <LineChart data={series}>
                         <Tooltip labelFormatter={(l) => shortDay(String(series[Number(l)]?.date ?? ''))} formatter={(v: number) => [brl(v), 'Faturamento']} />
@@ -117,19 +152,20 @@ export default function Stores() {
 
           {compare.length > 1 && (
             <Card className="mt-4">
-              <CardTitle hint="Faturamento no período">Comparativo entre lojas</CardTitle>
-              <div className="h-64">
+              <CardTitle hint="Faturamento × lucro líquido no período">Comparativo entre lojas</CardTitle>
+              <div className="h-72">
                 <ResponsiveContainer>
-                  <BarChart data={compare} layout="vertical" margin={{ left: 8, right: 16 }}>
-                    <CartesianGrid horizontal={false} />
-                    <XAxis type="number" tickFormatter={(v) => compactBrl(v)} tickLine={false} axisLine={false} />
-                    <YAxis type="category" dataKey="name" width={130} tickLine={false} axisLine={false} />
+                  <BarChart data={compare} margin={{ left: 0, right: 8 }}>
+                    <CartesianGrid vertical={false} />
+                    <XAxis dataKey="name" tickLine={false} axisLine={false} interval={0} />
+                    <YAxis tickFormatter={(v) => compactBrl(v)} width={64} tickLine={false} axisLine={false} />
                     <Tooltip formatter={(v: number) => brl(v)} cursor={{ fill: 'var(--hover)' }} />
-                    <Bar dataKey="Faturamento" radius={[0, 6, 6, 0]} maxBarSize={28}>
+                    <Bar dataKey="Faturamento" radius={[6, 6, 0, 0]} maxBarSize={40}>
                       {compare.map((c, i) => (
                         <Cell key={i} fill={c.color} />
                       ))}
                     </Bar>
+                    <Bar dataKey="Lucro" radius={[6, 6, 0, 0]} maxBarSize={40} fill="#10b981" fillOpacity={0.75} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -143,11 +179,11 @@ export default function Stores() {
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({ label, value, tone }: { label: string; value: string; tone?: 'red' }) {
   return (
     <div>
       <div className="text-faint text-xs">{label}</div>
-      <div className="font-medium tabular-nums">{value}</div>
+      <div className={cx('font-medium tabular-nums', tone === 'red' && 'text-rose-600')}>{value}</div>
     </div>
   );
 }
@@ -159,11 +195,12 @@ function StoreForm({ open, onClose, store }: { open: boolean; onClose: () => voi
 
   useEffect(() => {
     if (!open) return setS(null);
-    setS(store ? { ...store } : { id: uid(), name: '', channel: 'Shopee', color: STORE_COLORS[stores.length % STORE_COLORS.length], active: true, createdAt: new Date().toISOString() });
+    setS(store ? { ...store } : blankStore({ channel: 'Shopee', color: STORE_COLORS[stores.length % STORE_COLORS.length], ...CHANNEL_DEFAULT_FEES.Shopee }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, store]);
 
   if (!open || !s) return null;
+  const num0 = (v: string) => Math.max(0, Number(v.replace(',', '.')) || 0);
 
   async function submit() {
     try {
@@ -194,13 +231,30 @@ function StoreForm({ open, onClose, store }: { open: boolean; onClose: () => voi
           <Input autoFocus value={s.name} onChange={(e) => setS({ ...s, name: e.target.value })} placeholder="Ex.: Shopee Arco" />
         </Field>
         <Field label="Canal">
-          <Select value={s.channel} onChange={(e) => setS({ ...s, channel: e.target.value })}>
+          <Select
+            value={s.channel}
+            onChange={(e) => {
+              const channel = e.target.value;
+              const fees = !store ? CHANNEL_DEFAULT_FEES[channel] ?? { commissionPct: 0, fixedFee: 0 } : {};
+              setS({ ...s, channel, ...fees });
+            }}
+          >
             {CHANNELS.map((c) => (
               <option key={c}>{c}</option>
             ))}
           </Select>
         </Field>
-        <Field label="Cor">
+        <Field label="Meta mensal (R$)">
+          <Input type="number" min={0} step="100" value={s.monthlyGoal || ''} onChange={(e) => setS({ ...s, monthlyGoal: num0(e.target.value) })} placeholder="opcional" />
+        </Field>
+        <Field label="Comissão (%)" hint="Sobre o valor vendido">
+          <Input type="number" min={0} max={100} step="0.1" value={s.commissionPct} onChange={(e) => setS({ ...s, commissionPct: Math.min(100, num0(e.target.value)) })} />
+        </Field>
+        <Field label="Taxa fixa por pedido (R$)">
+          <Input type="number" min={0} step="0.01" value={s.fixedFee} onChange={(e) => setS({ ...s, fixedFee: num0(e.target.value) })} />
+        </Field>
+        <p className="text-faint col-span-2 -mt-2 text-xs">Valores sugeridos são referências aproximadas — confira as taxas reais da sua conta/categoria.</p>
+        <Field label="Cor" className="col-span-2">
           <div className="flex flex-wrap gap-2 pt-1">
             {STORE_COLORS.map((c) => (
               <button

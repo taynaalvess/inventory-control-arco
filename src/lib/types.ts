@@ -1,5 +1,10 @@
 export type MovementType = 'entrada' | 'saida' | 'venda' | 'devolucao' | 'ajuste';
-export type MovementSource = 'manual' | 'bipagem' | 'importacao' | 'upseller' | 'demo';
+export type MovementSource = 'manual' | 'bipagem' | 'importacao' | 'upseller' | 'demo' | 'compra' | 'kit';
+
+export interface KitItem {
+  productId: string;
+  qty: number;
+}
 
 export interface Product {
   id: string;
@@ -17,6 +22,12 @@ export interface Product {
   imageUrl: string;
   active: boolean;
   upsellerId: string;
+  supplierId: string;
+  /** Prazo de entrega do fornecedor em dias (para sugestão de compra). */
+  leadTimeDays: number;
+  /** Kit/combo: não tem saldo próprio, baixa os componentes. */
+  isKit: boolean;
+  kitItems: KitItem[];
   createdAt: string;
   updatedAt: string;
 }
@@ -27,6 +38,12 @@ export interface Store {
   channel: string;
   color: string;
   active: boolean;
+  /** Comissão do marketplace em % sobre o faturamento. */
+  commissionPct: number;
+  /** Taxa fixa por pedido (R$). */
+  fixedFee: number;
+  /** Meta de faturamento mensal (R$). */
+  monthlyGoal: number;
   createdAt: string;
 }
 
@@ -48,11 +65,76 @@ export interface Movement {
   createdAt: string;
 }
 
+export interface Supplier {
+  id: string;
+  name: string;
+  document: string;
+  contact: string;
+  phone: string;
+  email: string;
+  leadTimeDays: number;
+  notes: string;
+  createdAt: string;
+}
+
+export type PurchaseStatus = 'rascunho' | 'enviado' | 'parcial' | 'recebido' | 'cancelado';
+
+export interface PurchaseItem {
+  productId: string;
+  qty: number;
+  received: number;
+  unitCost: number;
+}
+
+export interface Purchase {
+  id: string;
+  number: string;
+  supplierId: string;
+  status: PurchaseStatus;
+  items: PurchaseItem[];
+  expectedAt: string;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Dataset {
   products: Product[];
   stores: Store[];
   movements: Movement[];
+  suppliers: Supplier[];
+  purchases: Purchase[];
 }
+
+export type Role = 'admin' | 'gestor' | 'operador' | 'leitura';
+
+export interface Profile {
+  id: string;
+  email: string;
+  name: string;
+  role: Role;
+  active: boolean;
+  createdAt: string;
+}
+
+export interface SecuritySettings {
+  requireMfa: boolean;
+  idleMinutes: number;
+}
+
+export const ROLE_LABEL: Record<Role, string> = {
+  admin: 'Administrador',
+  gestor: 'Gestor',
+  operador: 'Operador',
+  leitura: 'Somente leitura',
+};
+
+export const ROLE_HINT: Record<Role, string> = {
+  admin: 'Tudo, inclusive usuários, segurança, auditoria e exclusões',
+  gestor: 'Gerencia produtos, lojas, compras, importações e relatórios',
+  operador: 'Bipagem, recebimento de compras e consulta de produtos (sem valores)',
+  leitura: 'Vê dashboard, lojas e relatórios, sem alterar nada',
+};
 
 export const MOVEMENT_LABEL: Record<MovementType, string> = {
   entrada: 'Entrada',
@@ -68,6 +150,16 @@ export const SOURCE_LABEL: Record<MovementSource, string> = {
   importacao: 'Planilha',
   upseller: 'UpSeller',
   demo: 'Demo',
+  compra: 'Compra',
+  kit: 'Kit',
+};
+
+export const PURCHASE_LABEL: Record<PurchaseStatus, string> = {
+  rascunho: 'Rascunho',
+  enviado: 'Enviado',
+  parcial: 'Recebido parcial',
+  recebido: 'Recebido',
+  cancelado: 'Cancelado',
 };
 
 export const CHANNELS = [
@@ -83,4 +175,37 @@ export const CHANNELS = [
   'Outro',
 ];
 
+/** Comissões aproximadas de referência (confira o seu contrato/categoria). */
+export const CHANNEL_DEFAULT_FEES: Record<string, { commissionPct: number; fixedFee: number }> = {
+  Shopee: { commissionPct: 20, fixedFee: 4 },
+  'Mercado Livre': { commissionPct: 16, fixedFee: 6.25 },
+  Amazon: { commissionPct: 15, fixedFee: 0 },
+  Magalu: { commissionPct: 16, fixedFee: 0 },
+  Shein: { commissionPct: 16, fixedFee: 0 },
+  'TikTok Shop': { commissionPct: 12, fixedFee: 0 },
+  Americanas: { commissionPct: 16, fixedFee: 0 },
+};
+
 export const STORE_COLORS = ['#6366f1', '#f97316', '#10b981', '#eab308', '#ec4899', '#06b6d4', '#8b5cf6', '#ef4444', '#84cc16', '#64748b'];
+
+export const emptyDataset = (): Dataset => ({ products: [], stores: [], movements: [], suppliers: [], purchases: [] });
+
+/** Garante campos novos em dados antigos (backups, IndexedDB). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Loose = { [K in keyof Dataset]?: any[] };
+
+export function upgradeDataset(d: Loose): Dataset {
+  return {
+    products: (d.products ?? []).map((p) => ({
+      supplierId: '',
+      leadTimeDays: 0,
+      isKit: false,
+      kitItems: [],
+      ...p,
+    })),
+    stores: (d.stores ?? []).map((s) => ({ commissionPct: 0, fixedFee: 0, monthlyGoal: 0, ...s })),
+    movements: d.movements ?? [],
+    suppliers: d.suppliers ?? [],
+    purchases: d.purchases ?? [],
+  };
+}

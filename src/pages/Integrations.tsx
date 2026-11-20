@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, FileSpreadsheet, Github, KeyRound, RefreshCw, Upload, Zap } from 'lucide-react';
-import { blankProduct, useStore, type NewMovement } from '../lib/store';
-import { errMsg, norm, uid, dateTime } from '../lib/format';
+import { blankProduct, blankStore, useStore, type NewMovement } from '../lib/store';
+import { errMsg, norm, dateTime } from '../lib/format';
 import { CANCELLED, ORDER_FIELDS, PRODUCT_FIELDS, cell, guessChannel, guessMapping, parseDate, parseNum, readSheet, str, type FieldDef, type Mapping, type Sheet } from '../lib/importers';
 import { fetchSyncRuns, type SyncRun } from '../lib/db/supabase';
-import { STORE_COLORS, type Product, type Store } from '../lib/types';
+import { CHANNEL_DEFAULT_FEES, STORE_COLORS, type Product, type Store } from '../lib/types';
 import { Badge, Button, Card, CardTitle, Field, PageHeader, Segmented, Select, cx } from '../components/ui';
 import { useToast } from '../components/toast';
 
@@ -166,7 +166,8 @@ function SheetImport() {
       if (sName) {
         let s = storeByName.get(norm(sName));
         if (!s) {
-          s = { id: uid(), name: sName, channel: guessChannel(sName), color: STORE_COLORS[(stores.length + newStores.length) % STORE_COLORS.length], active: true, createdAt: new Date().toISOString() };
+          const channel = guessChannel(sName);
+          s = blankStore({ name: sName, channel, color: STORE_COLORS[(stores.length + newStores.length) % STORE_COLORS.length], ...(CHANNEL_DEFAULT_FEES[channel] ?? {}) });
           storeByName.set(norm(sName), s);
           newStores.push(s);
         }

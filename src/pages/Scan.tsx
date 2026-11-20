@@ -25,7 +25,7 @@ interface Line {
 }
 
 export default function Scan() {
-  const { products, stores, findByCode, productById, addMovements, adjustStockTo } = useStore();
+  const { products, stores, findByCode, productById, addMovements, adjustStockTo, can } = useStore();
   const toast = useToast();
   const [mode, setMode] = useState<Mode>('entrada');
   const [storeId, setStoreId] = useState('');
@@ -77,6 +77,11 @@ export default function Scan() {
       const c = raw.trim();
       if (!c) return;
       const p = findByCode(c);
+      if (p && p.isKit && mode === 'conferencia') {
+        beep('error');
+        setLast({ product: null, code: `${c} (kit — conte os componentes)`, at: Date.now() });
+        return;
+      }
       if (!p) {
         beep('error');
         setLast({ product: null, code: c, at: Date.now() });
@@ -94,13 +99,13 @@ export default function Scan() {
   const totalUnits = lines.reduce((s, l) => s + l.qty, 0);
   const totalValue = lines.reduce((s, l) => {
     const p = productById.get(l.productId);
-    return s + l.qty * (mode === 'venda' ? p?.price ?? 0 : p?.cost ?? 0);
+    return s + l.qty * (mode === 'venda' || mode === 'devolucao' ? p?.price ?? 0 : can('finance') ? p?.cost ?? 0 : 0);
   }, 0);
 
   const divergences = useMemo(() => {
     if (mode !== 'conferencia') return [];
     const counted = new Map(lines.map((l) => [l.productId, l.qty]));
-    const ids = zeroMissing ? products.filter((p) => p.active).map((p) => p.id) : [...counted.keys()];
+    const ids = zeroMissing ? products.filter((p) => p.active && !p.isKit).map((p) => p.id) : [...counted.keys()].filter((id) => !productById.get(id)?.isKit);
     return ids
       .map((id) => {
         const p = productById.get(id)!;
@@ -156,7 +161,7 @@ export default function Scan() {
 
   const negatives =
     mode === 'saida' || mode === 'venda'
-      ? lines.filter((l) => (productById.get(l.productId)?.stock ?? 0) - l.qty < 0)
+      ? lines.filter((l) => !productById.get(l.productId)?.isKit && (productById.get(l.productId)?.stock ?? 0) - l.qty < 0)
       : [];
   const current = MODES.find((m) => m.value === mode)!;
 
@@ -301,13 +306,13 @@ export default function Scan() {
               {lines.map((l) => {
                 const p = productById.get(l.productId);
                 if (!p) return null;
-                const after = mode === 'conferencia' ? l.qty : p.stock + (mode === 'entrada' || mode === 'devolucao' ? l.qty : -l.qty);
+                const after = p.isKit ? 0 : mode === 'conferencia' ? l.qty : p.stock + (mode === 'entrada' || mode === 'devolucao' ? l.qty : -l.qty);
                 return (
                   <li key={l.productId} className="flex items-center gap-3 py-2.5">
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-medium">{p.name}</div>
                       <div className="text-faint text-xs">
-                        {p.sku} · saldo {p.stock} → <span className={after < 0 ? 'text-rose-500' : ''}>{after}</span>
+                        {p.isKit ? <>{p.sku} · kit: baixa {p.kitItems.length} componente(s)</> : <>{p.sku} · saldo {p.stock} → <span className={after < 0 ? 'text-rose-500' : ''}>{after}</span></>}
                         {mode === 'conferencia' && after !== p.stock && <span className="ml-1 text-amber-600">(dif. {after - p.stock > 0 ? '+' : ''}{after - p.stock})</span>}
                       </div>
                     </div>
@@ -368,19 +373,21 @@ export default function Scan() {
             >
               Ignorar
             </Button>
-            <Button
-              onClick={() => {
-                setCreating(unknown);
-                setUnknown(null);
-              }}
-            >
-              Cadastrar produto
-            </Button>
+            {can('manage') && (
+              <Button
+                onClick={() => {
+                  setCreating(unknown);
+                  setUnknown(null);
+                }}
+              >
+                Cadastrar produto
+              </Button>
+            )}
           </>
         }
       >
         <p className="text-sm">
-          O código <b className="font-mono">{unknown}</b> não pertence a nenhum produto (EAN ou SKU). Deseja cadastrá-lo agora?
+          O código <b className="font-mono">{unknown}</b> não pertence a nenhum produto (EAN ou SKU).{can('manage') ? ' Deseja cadastrá-lo agora?' : ' Peça a um gestor para cadastrá-lo.'}
         </p>
       </Modal>
 
