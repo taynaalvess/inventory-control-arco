@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { CheckCheck, ClipboardList, Lightbulb, PackageCheck, Pencil, Plus, ScanBarcode, Send, Trash2, Truck, Users, XCircle } from 'lucide-react';
+import { CheckCheck, ClipboardList, FileCode2, FileText, Lightbulb, PackageCheck, Pencil, Plus, ScanBarcode, Send, Trash2, Truck, XCircle } from 'lucide-react';
 import { useStore } from '../lib/store';
 import { dailyConsumption } from '../lib/metrics';
 import { beep } from '../lib/feedback';
 import { brl, dateTime, errMsg, num, uid } from '../lib/format';
 import { download, stamp, toCSV } from '../lib/files';
-import { PURCHASE_LABEL, type Purchase, type PurchaseStatus, type Supplier } from '../lib/types';
+import { PURCHASE_LABEL, type Purchase, type PurchaseStatus } from '../lib/types';
 import { ProductPicker } from '../components/ProductPicker';
+import { NfeImport } from '../components/NfeImport';
+import { SuppliersTab } from './Suppliers';
 import { Badge, Button, Card, CardTitle, Empty, Field, Input, Modal, PageHeader, Segmented, Select, cx } from '../components/ui';
 import { useToast } from '../components/toast';
 
@@ -50,7 +52,7 @@ export default function Purchases() {
       />
       {tab === 'pedidos' && <Orders />}
       {tab === 'sugestao' && <Suggestion onCreated={() => setTab('pedidos')} />}
-      {tab === 'fornecedores' && <Suppliers />}
+      {tab === 'fornecedores' && <SuppliersTab />}
     </>
   );
 }
@@ -64,6 +66,7 @@ function Orders() {
   const [editing, setEditing] = useState<Purchase | null>(null);
   const [creating, setCreating] = useState(false);
   const [receiving, setReceiving] = useState<Purchase | null>(null);
+  const [importing, setImporting] = useState(false);
   const finance = can('finance');
 
   const list = useMemo(
@@ -95,15 +98,25 @@ function Orders() {
           ]}
         />
         {can('manage') && (
-          <Button onClick={() => setCreating(true)}>
-            <Plus size={16} /> Novo pedido
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" onClick={() => setImporting(true)}>
+              <FileCode2 size={16} /> Importar NF-e (XML)
+            </Button>
+            <Button onClick={() => setCreating(true)}>
+              <Plus size={16} /> Novo pedido
+            </Button>
+          </div>
         )}
       </div>
 
       {list.length === 0 ? (
         <Card>
-          <Empty icon={<ClipboardList size={36} />} title="Nenhum pedido de compra" text="Crie um pedido manualmente ou use a Sugestão de compra para gerar a partir do ritmo de vendas." />
+          <Empty
+            icon={<ClipboardList size={36} />}
+            title="Nenhum pedido de compra"
+            text="Importe o XML da NF-e para lançar a entrada direto no estoque, crie um pedido manualmente ou use a Sugestão de compra."
+            action={can('manage') && <Button onClick={() => setImporting(true)}><FileCode2 size={16} /> Importar NF-e</Button>}
+          />
         </Card>
       ) : (
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -122,6 +135,16 @@ function Orders() {
                 <span>Criado {dateTime(p.createdAt)}</span>
                 {p.expectedAt && <span className="text-right">Previsto {new Date(`${p.expectedAt}T12:00:00`).toLocaleDateString('pt-BR')}</span>}
               </div>
+              {p.invoiceNumber && (
+                <div className="mt-2 flex items-center gap-1.5 text-xs" title={p.invoiceKey ? `Chave: ${p.invoiceKey}` : undefined}>
+                  <FileText size={12} className="text-brand" />
+                  <span>
+                    NF-e {p.invoiceNumber}
+                    {p.invoiceDate && ` · ${new Date(`${p.invoiceDate}T12:00:00`).toLocaleDateString('pt-BR')}`}
+                    {finance && p.invoiceTotal > 0 && ` · ${brl(p.invoiceTotal)}`}
+                  </span>
+                </div>
+              )}
               {(p.status === 'parcial' || p.status === 'recebido') && (
                 <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[var(--hover)]">
                   <div className="h-full rounded-full bg-emerald-500" style={{ width: `${progress(p) * 100}%` }} />
@@ -178,6 +201,7 @@ function Orders() {
 
       <PurchaseForm open={creating || !!editing} purchase={editing} onClose={() => (setCreating(false), setEditing(null))} />
       <ReceiveModal purchase={receiving} onClose={() => setReceiving(null)} />
+      <NfeImport open={importing} onClose={() => setImporting(false)} />
     </>
   );
 }
@@ -191,7 +215,7 @@ function PurchaseForm({ open, onClose, purchase }: { open: boolean; onClose: () 
   useEffect(() => {
     if (!open) return setP(null);
     const now = new Date().toISOString();
-    setP(purchase ? { ...purchase, items: purchase.items.map((i) => ({ ...i })) } : { id: uid(), number: nextPurchaseNumber(), supplierId: '', status: 'rascunho', items: [], expectedAt: '', notes: '', createdAt: now, updatedAt: now });
+    setP(purchase ? { ...purchase, items: purchase.items.map((i) => ({ ...i })) } : { id: uid(), number: nextPurchaseNumber(), supplierId: '', status: 'rascunho', items: [], expectedAt: '', notes: '', invoiceNumber: '', invoiceKey: '', invoiceDate: '', invoiceTotal: 0, createdAt: now, updatedAt: now });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, purchase]);
 
@@ -447,6 +471,10 @@ function Suggestion({ onCreated }: { onCreated: () => void }) {
           items: list.map((r) => ({ productId: r.p.id, qty: selected[r.p.id], received: 0, unitCost: r.p.cost })),
           expectedAt: '',
           notes: `Gerado pela sugestão de compra (cobertura ${coverage} dias)`,
+          invoiceNumber: '',
+          invoiceKey: '',
+          invoiceDate: '',
+          invoiceTotal: 0,
           createdAt: now,
           updatedAt: now,
         });
@@ -537,143 +565,5 @@ function Suggestion({ onCreated }: { onCreated: () => void }) {
       )}
       {suppliers.length === 0 && <p className="text-faint mt-3 text-xs">Dica: cadastre fornecedores e vincule aos produtos para gerar um pedido por fornecedor automaticamente.</p>}
     </Card>
-  );
-}
-
-/* ============================ FORNECEDORES ============================ */
-
-function Suppliers() {
-  const { suppliers, products, saveSupplier, deleteSupplier, can } = useStore();
-  const toast = useToast();
-  const [editing, setEditing] = useState<Supplier | null>(null);
-
-  const blank = (): Supplier => ({ id: uid(), name: '', document: '', contact: '', phone: '', email: '', leadTimeDays: 7, notes: '', createdAt: new Date().toISOString() });
-
-  return (
-    <>
-      <div className="mb-4 flex justify-end">
-        <Button onClick={() => setEditing(blank())}>
-          <Plus size={16} /> Novo fornecedor
-        </Button>
-      </div>
-      {suppliers.length === 0 ? (
-        <Card>
-          <Empty icon={<Users size={36} />} title="Nenhum fornecedor" action={<Button onClick={() => setEditing(blank())}>Cadastrar fornecedor</Button>} />
-        </Card>
-      ) : (
-        <Card className="p-0 sm:p-0">
-          <div className="overflow-x-auto">
-            <table className="data">
-              <thead>
-                <tr>
-                  <th>Fornecedor</th>
-                  <th>Contato</th>
-                  <th>Telefone</th>
-                  <th className="text-right">Prazo</th>
-                  <th className="text-right">Produtos</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {suppliers
-                  .slice()
-                  .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
-                  .map((s) => (
-                    <tr key={s.id}>
-                      <td>
-                        <div className="font-medium">{s.name}</div>
-                        <div className="text-faint text-xs">{s.document}</div>
-                      </td>
-                      <td className="text-muted">
-                        {s.contact}
-                        {s.email && <div className="text-xs">{s.email}</div>}
-                      </td>
-                      <td className="text-muted whitespace-nowrap">{s.phone}</td>
-                      <td className="text-right tabular-nums">{s.leadTimeDays}d</td>
-                      <td className="text-right tabular-nums">{products.filter((p) => p.supplierId === s.id).length}</td>
-                      <td>
-                        <div className="flex justify-end gap-1">
-                          <button className="text-muted rounded-lg p-1.5 hover:bg-hover" onClick={() => setEditing(s)} title="Editar">
-                            <Pencil size={15} />
-                          </button>
-                          {can('admin') && (
-                            <button
-                              className="text-muted rounded-lg p-1.5 hover:bg-hover hover:text-rose-500"
-                              title="Excluir"
-                              onClick={async () => {
-                                if (!window.confirm(`Excluir ${s.name}? Os produtos ficam sem fornecedor.`)) return;
-                                try {
-                                  await deleteSupplier(s.id);
-                                  toast('Fornecedor excluído');
-                                } catch (e) {
-                                  toast(errMsg(e), 'error');
-                                }
-                              }}
-                            >
-                              <Trash2 size={15} />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      )}
-
-      {editing && (
-        <Modal
-          open
-          onClose={() => setEditing(null)}
-          title={suppliers.some((s) => s.id === editing.id) ? 'Editar fornecedor' : 'Novo fornecedor'}
-          footer={
-            <>
-              <Button variant="secondary" onClick={() => setEditing(null)}>
-                Cancelar
-              </Button>
-              <Button
-                onClick={async () => {
-                  try {
-                    await saveSupplier(editing);
-                    toast('Fornecedor salvo');
-                    setEditing(null);
-                  } catch (e) {
-                    toast(errMsg(e), 'error');
-                  }
-                }}
-              >
-                Salvar
-              </Button>
-            </>
-          }
-        >
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Nome *" className="col-span-2">
-              <Input autoFocus value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
-            </Field>
-            <Field label="CNPJ/CPF">
-              <Input value={editing.document} onChange={(e) => setEditing({ ...editing, document: e.target.value })} />
-            </Field>
-            <Field label="Prazo de entrega (dias)">
-              <Input type="number" min={0} value={editing.leadTimeDays} onChange={(e) => setEditing({ ...editing, leadTimeDays: Math.max(0, Number(e.target.value) || 0) })} />
-            </Field>
-            <Field label="Contato">
-              <Input value={editing.contact} onChange={(e) => setEditing({ ...editing, contact: e.target.value })} />
-            </Field>
-            <Field label="Telefone / WhatsApp">
-              <Input value={editing.phone} onChange={(e) => setEditing({ ...editing, phone: e.target.value })} />
-            </Field>
-            <Field label="E-mail" className="col-span-2">
-              <Input type="email" value={editing.email} onChange={(e) => setEditing({ ...editing, email: e.target.value })} />
-            </Field>
-            <Field label="Observações" className="col-span-2">
-              <Input value={editing.notes} onChange={(e) => setEditing({ ...editing, notes: e.target.value })} />
-            </Field>
-          </div>
-        </Modal>
-      )}
-    </>
   );
 }

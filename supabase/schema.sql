@@ -114,6 +114,11 @@ create table if not exists public.suppliers (
   created_at     timestamptz not null default now()
 );
 
+alter table public.suppliers add column if not exists website text not null default '';
+alter table public.suppliers add column if not exists product_codes jsonb not null default '{}'::jsonb;
+alter table public.suppliers add column if not exists category text not null default '';
+alter table public.suppliers add column if not exists ratings jsonb not null default '{}'::jsonb;
+
 create table if not exists public.products (
   id             uuid primary key default gen_random_uuid(),
   sku            text not null,
@@ -173,7 +178,13 @@ create table if not exists public.purchase_orders (
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now()
 );
+alter table public.purchase_orders add column if not exists invoice_number text not null default '';
+alter table public.purchase_orders add column if not exists invoice_key text not null default '';
+alter table public.purchase_orders add column if not exists invoice_date date;
+alter table public.purchase_orders add column if not exists invoice_total numeric(14,2) not null default 0;
 create unique index if not exists purchase_orders_number_key on public.purchase_orders (number);
+-- a mesma NF-e não pode ser lançada duas vezes
+create unique index if not exists purchase_orders_invoice_key on public.purchase_orders (invoice_key) where invoice_key <> '';
 
 create table if not exists public.sync_runs (
   id          uuid primary key default gen_random_uuid(),

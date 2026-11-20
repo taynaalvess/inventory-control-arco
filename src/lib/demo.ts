@@ -46,8 +46,8 @@ export function generateDemo(): Dataset {
   const weights = [0.42, 0.33, 0.15, 0.1];
 
   const suppliers: Supplier[] = [
-    { id: uid(), name: 'Distribuidora Tech SP', document: '12.345.678/0001-90', contact: 'Carla', phone: '(11) 99999-0000', email: 'vendas@techsp.example', leadTimeDays: 7, notes: '', createdAt: created },
-    { id: uid(), name: 'Importadora Oriente', document: '98.765.432/0001-10', contact: 'Wei', phone: '(11) 98888-1111', email: 'compras@oriente.example', leadTimeDays: 25, notes: 'Pedido mínimo R$ 3.000', createdAt: created },
+    { id: uid(), name: 'Distribuidora Tech SP', document: '12.345.678/0001-90', contact: 'Carla', phone: '(11) 99999-0000', email: 'vendas@techsp.example', website: 'https://techsp.example', category: 'Eletrônicos', ratings: { quality: 5, delivery: 4, price: 3, service: 5 }, leadTimeDays: 7, notes: '', productCodes: {}, createdAt: created },
+    { id: uid(), name: 'Importadora Oriente', document: '98.765.432/0001-10', contact: 'Wei', phone: '(11) 98888-1111', email: 'compras@oriente.example', website: '', category: 'Informática', ratings: { quality: 4, delivery: 2, price: 5, service: 3 }, leadTimeDays: 25, notes: 'Pedido mínimo R$ 3.000', productCodes: {}, createdAt: created },
   ];
 
   const products: Product[] = CATALOG.map(([name, category, cost, price], i) =>
@@ -151,6 +151,10 @@ export function generateDemo(): Dataset {
       items: products.slice(0, 6).map((p) => ({ productId: p.id, qty: 80, received: 80, unitCost: +(p.cost * 1.05).toFixed(2) })),
       expectedAt: '',
       notes: 'Reposição',
+      invoiceNumber: '4512',
+      invoiceKey: '',
+      invoiceDate: addDays(now, -45).toISOString().slice(0, 10),
+      invoiceTotal: 0,
       createdAt: addDays(now, -50).toISOString(),
       updatedAt: addDays(now, -45).toISOString(),
     },
@@ -162,6 +166,10 @@ export function generateDemo(): Dataset {
       items: [products[0], products[9], products[12]].map((p) => ({ productId: p.id, qty: 60, received: 0, unitCost: p.cost })),
       expectedAt: addDays(now, 10).toISOString().slice(0, 10),
       notes: '',
+      invoiceNumber: '',
+      invoiceKey: '',
+      invoiceDate: '',
+      invoiceTotal: 0,
       createdAt: addDays(now, -5).toISOString(),
       updatedAt: addDays(now, -5).toISOString(),
     },

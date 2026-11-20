@@ -72,10 +72,41 @@ export interface Supplier {
   contact: string;
   phone: string;
   email: string;
+  website: string;
+  /** Segmento: Pet, Bike, Doméstico… */
+  category: string;
+  /** Avaliação 0–5 por critério (0 = não avaliado). */
+  ratings: SupplierRatings;
   leadTimeDays: number;
   notes: string;
+  /** Memória da NF-e: código do produto no fornecedor (cProd) → produto + fator de conversão. */
+  productCodes: Record<string, { productId: string; factor: number }>;
   createdAt: string;
 }
+
+export interface SupplierRatings {
+  quality: number;
+  delivery: number;
+  price: number;
+  service: number;
+}
+
+export const SUPPLIER_CATEGORIES = [
+  'Pet',
+  'Bike',
+  'Doméstico',
+  'Eletrônicos',
+  'Informática',
+  'Moda',
+  'Beleza',
+  'Esporte',
+  'Brinquedos',
+  'Ferramentas',
+  'Papelaria',
+  'Embalagens',
+  'Alimentos',
+  'Automotivo',
+];
 
 export type PurchaseStatus = 'rascunho' | 'enviado' | 'parcial' | 'recebido' | 'cancelado';
 
@@ -94,6 +125,11 @@ export interface Purchase {
   items: PurchaseItem[];
   expectedAt: string;
   notes: string;
+  /** Dados da NF-e vinculada (quando importada). */
+  invoiceNumber: string;
+  invoiceKey: string;
+  invoiceDate: string;
+  invoiceTotal: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -205,7 +241,7 @@ export function upgradeDataset(d: Loose): Dataset {
     })),
     stores: (d.stores ?? []).map((s) => ({ commissionPct: 0, fixedFee: 0, monthlyGoal: 0, ...s })),
     movements: d.movements ?? [],
-    suppliers: d.suppliers ?? [],
-    purchases: d.purchases ?? [],
+    suppliers: (d.suppliers ?? []).map((s) => ({ website: '', category: '', productCodes: {}, ...s, ratings: { quality: 0, delivery: 0, price: 0, service: 0, ...(s.ratings ?? {}) } })),
+    purchases: (d.purchases ?? []).map((p) => ({ invoiceNumber: '', invoiceKey: '', invoiceDate: '', invoiceTotal: 0, ...p })),
   };
 }

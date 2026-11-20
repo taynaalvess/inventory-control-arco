@@ -138,8 +138,12 @@ const supplierFromRow = (r: Row): Supplier => ({
   contact: s(r.contact),
   phone: s(r.phone),
   email: s(r.email),
+  website: s(r.website),
+  category: s(r.category),
+  ratings: { quality: 0, delivery: 0, price: 0, service: 0, ...((r.ratings as Partial<Supplier['ratings']>) ?? {}) },
   leadTimeDays: n(r.lead_time_days),
   notes: s(r.notes),
+  productCodes: r.product_codes && typeof r.product_codes === 'object' ? (r.product_codes as Supplier['productCodes']) : {},
   createdAt: s(r.created_at),
 });
 
@@ -150,8 +154,12 @@ const supplierToRow = (x: Supplier): Row => ({
   contact: x.contact,
   phone: x.phone,
   email: x.email,
+  website: x.website,
+  category: x.category,
+  ratings: x.ratings,
   lead_time_days: x.leadTimeDays,
   notes: x.notes,
+  product_codes: x.productCodes,
   created_at: x.createdAt,
 });
 
@@ -163,6 +171,10 @@ const purchaseFromRow = (r: Row): Purchase => ({
   items: arr<PurchaseItem>(r.items),
   expectedAt: s(r.expected_at),
   notes: s(r.notes),
+  invoiceNumber: s(r.invoice_number),
+  invoiceKey: s(r.invoice_key),
+  invoiceDate: s(r.invoice_date),
+  invoiceTotal: n(r.invoice_total),
   createdAt: s(r.created_at),
   updatedAt: s(r.updated_at),
 });
@@ -175,6 +187,10 @@ const purchaseToRow = (p: Purchase): Row => ({
   items: p.items,
   expected_at: p.expectedAt || null,
   notes: p.notes,
+  invoice_number: p.invoiceNumber,
+  invoice_key: p.invoiceKey,
+  invoice_date: p.invoiceDate || null,
+  invoice_total: p.invoiceTotal,
   created_at: p.createdAt,
   updated_at: p.updatedAt,
 });
