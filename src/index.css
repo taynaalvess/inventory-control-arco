@@ -1,0 +1,139 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --bg: #f6f7fb;
+  --surface: #ffffff;
+  --hover: #f1f3f9;
+  --line: #e4e7ef;
+  --text: #0f172a;
+  --muted: #5b6477;
+  --faint: #8a93a6;
+  --grid: #e9ecf3;
+  color-scheme: light;
+}
+
+.dark {
+  --bg: #0b1020;
+  --surface: #121a2e;
+  --hover: #1a2440;
+  --line: #243050;
+  --text: #e6e9f2;
+  --muted: #a3acc2;
+  --faint: #6f7a94;
+  --grid: #1e2944;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --color-brand: #4f46e5;
+  --color-brand-600: #4338ca;
+  --color-surface: var(--surface);
+  --color-hover: var(--hover);
+  --color-line: var(--line);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-fg: var(--text);
+  --color-page: var(--bg);
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--text);
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-family: var(--font-sans);
+  overflow-x: hidden;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+}
+
+.text-muted {
+  color: var(--muted);
+}
+.text-faint {
+  color: var(--faint);
+}
+
+table.data {
+  width: 100%;
+  font-size: 0.875rem;
+  border-collapse: collapse;
+}
+table.data th {
+  text-align: left;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--muted);
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+table.data td {
+  padding: 0.65rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+table.data tbody tr:hover {
+  background: var(--hover);
+}
+table.data tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.recharts-cartesian-grid line {
+  stroke: var(--grid);
+}
+.recharts-text {
+  fill: var(--faint);
+  font-size: 11px;
+}
+.recharts-default-tooltip {
+  background: var(--surface) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+  font-size: 12px;
+}
+.recharts-tooltip-label {
+  color: var(--text);
+  font-weight: 600;
+}
+
+@keyframes scan {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(calc(var(--h, 120px)));
+  }
+}
+.scanline {
+  --h: 120px;
+  margin-top: 8px;
+  animation: scan 2.2s ease-in-out infinite;
+}
+
+@keyframes pop {
+  0% {
+    transform: scale(0.96);
+    opacity: 0.4;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+.pop {
+  animation: pop 0.18s ease-out;
+}
