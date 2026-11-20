@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { AlertTriangle, CheckCircle2, FileCode2, Sparkles } from 'lucide-react';
 import { blankProduct, useStore } from '../lib/store';
 import { brl, errMsg, norm, num, uid } from '../lib/format';
-import { formatDoc, itemLandedTotal, onlyDigits, parseNfe, suggestFactor, type Nfe, type NfeItem } from '../lib/nfe';
+import { formatDoc, itemLandedTotal, nameSimilarity, onlyDigits, parseNfe, suggestFactor, type Nfe, type NfeItem } from '../lib/nfe';
 import { beep } from '../lib/feedback';
 import type { Product, Purchase, Supplier } from '../lib/types';
 import { ProductPicker } from './ProductPicker';
@@ -29,6 +29,7 @@ export function NfeImport({ open, onClose }: { open: boolean; onClose: () => voi
   const [includeTaxes, setIncludeTaxes] = useState(true);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [reading, setReading] = useState(false);
   const [done, setDone] = useState<{ po: string; created: Product[]; units: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -48,9 +49,10 @@ export function NfeImport({ open, onClose }: { open: boolean; onClose: () => voi
   async function onFile(f: File | undefined) {
     if (!f) return;
     reset();
+    setReading(true);
     try {
-      if (/\.pdf$/i.test(f.name)) throw new Error('Este é o PDF (DANFE). Para leitura exata, use o arquivo XML da nota — o fornecedor envia junto por e-mail.');
-      const parsed = parseNfe(await f.text());
+      const isPdf = /\.pdf$/i.test(f.name) || f.type === 'application/pdf';
+      const parsed = isPdf ? await (await import('../lib/danfe')).parseDanfePdf(f) : parseNfe(await f.text());
       const dup = purchases.find((p) => parsed.key && p.invoiceKey === parsed.key);
       if (dup) throw new Error(`Esta NF-e já foi lançada no pedido ${dup.number}.`);
 
@@ -71,6 +73,14 @@ export function NfeImport({ open, onClose }: { open: boolean; onClose: () => voi
         }
         const bySku = it.code ? usable(findByCode(it.code)) : undefined;
         if (bySku) return { item: it, mode: 'match', productId: bySku.id, factor: 1, how: 'SKU' };
+        // último recurso: nome parecido (sugestão para conferir)
+        let best: { p: Product; score: number } | null = null;
+        for (const p of products) {
+          if (p.isKit || !p.active) continue;
+          const score = nameSimilarity(it.name, p.name);
+          if (score >= 0.6 && (!best || score > best.score)) best = { p, score };
+        }
+        if (best) return { item: it, mode: 'match', productId: best.p.id, factor: suggestFactor(it), how: `nome parecido (${Math.round(best.score * 100)}%) — confira` };
         return { item: it, mode: 'create', productId: null, factor: suggestFactor(it), how: '' };
       });
 
@@ -81,6 +91,8 @@ export function NfeImport({ open, onClose }: { open: boolean; onClose: () => voi
     } catch (e) {
       beep('error');
       setError(errMsg(e));
+    } finally {
+      setReading(false);
     }
   }
 
@@ -113,7 +125,7 @@ export function NfeImport({ open, onClose }: { open: boolean; onClose: () => voi
       if (!supplier) {
         supplier = {
           id: uid(),
-          name: nfe.supplier.tradeName || nfe.supplier.name,
+          name: nfe.supplier.tradeName || nfe.supplier.name || `Fornecedor ${formatDoc(nfe.supplier.document)}`,
           document: formatDoc(nfe.supplier.document),
           contact: '',
           phone: nfe.supplier.phone,
@@ -264,9 +276,9 @@ export function NfeImport({ open, onClose }: { open: boolean; onClose: () => voi
               void onFile(e.dataTransfer.files[0]);
             }}
           >
-            <FileCode2 className="text-brand" size={32} />
-            <p className="font-medium">Arraste o XML da NF-e aqui</p>
-            <p className="text-faint text-xs">ou clique para escolher · arquivo .xml que o fornecedor envia junto com a nota</p>
+            <FileCode2 className={cx('text-brand', reading && 'animate-pulse')} size={32} />
+            <p className="font-medium">{reading ? 'Lendo a nota…' : 'Arraste o PDF (DANFE) ou o XML da nota'}</p>
+            <p className="text-faint text-xs">ou clique para escolher · o arquivo é lido no seu aparelho e não é enviado a ninguém</p>
           </div>
           <input ref={fileRef} type="file" accept=".xml,text/xml,application/xml,.pdf" className="hidden" onChange={(e) => (void onFile(e.target.files?.[0]), (e.target.value = ''))} />
           {error && (
@@ -277,7 +289,7 @@ export function NfeImport({ open, onClose }: { open: boolean; onClose: () => voi
           <ul className="text-muted mt-4 space-y-1 text-xs">
             <li>
               <Sparkles size={12} className="mr-1 inline text-amber-500" />
-              Reconhece os produtos pelo EAN, pelo código do fornecedor (e lembra para as próximas notas) ou pelo SKU.
+              Reconhece os produtos pelo EAN, pelo código do fornecedor (e lembra para as próximas notas), pelo SKU ou pelo nome.
             </li>
             <li>
               <Sparkles size={12} className="mr-1 inline text-amber-500" />
@@ -287,10 +299,30 @@ export function NfeImport({ open, onClose }: { open: boolean; onClose: () => voi
               <Sparkles size={12} className="mr-1 inline text-amber-500" />
               Custo real por unidade: produto + frete + seguro + outras despesas − desconto (+ IPI e ICMS-ST).
             </li>
+            <li>
+              <Sparkles size={12} className="mr-1 inline text-amber-500" />
+              PDF: lê chave, emitente, itens e totais do DANFE e confere as somas. O XML é 100% exato e ainda traz o EAN — prefira quando tiver.
+            </li>
           </ul>
         </>
       ) : (
         <div className="space-y-4">
+          {nfe.source === 'pdf' && (
+            <div className={cx('rounded-xl p-3 text-sm', nfe.warnings?.length ? 'bg-amber-500/10 text-amber-800 dark:text-amber-200' : 'bg-sky-500/10 text-sky-800 dark:text-sky-200')}>
+              <p className="flex items-center gap-2 font-medium">
+                <AlertTriangle size={16} /> Lido do PDF (DANFE) — confira quantidades e custos antes de lançar
+              </p>
+              {nfe.warnings && nfe.warnings.length > 0 ? (
+                <ul className="mt-1 list-disc space-y-0.5 pl-6 text-xs">
+                  {nfe.warnings.map((w, i) => (
+                    <li key={i}>{w}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-1 text-xs">As somas dos itens e dos totais conferem com a nota. Frete e impostos foram rateados pelo valor de cada item.</p>
+              )}
+            </div>
+          )}
           <div className="grid gap-3 rounded-xl bg-[var(--hover)] p-3 text-sm sm:grid-cols-4">
             <div>
               <div className="text-faint text-xs">NF-e</div>
@@ -310,7 +342,7 @@ export function NfeImport({ open, onClose }: { open: boolean; onClose: () => voi
             <div className="min-w-0">
               <div className="text-faint text-xs">Emitente</div>
               <div className="truncate font-medium" title={nfe.supplier.name}>
-                {nfe.supplier.tradeName || nfe.supplier.name}
+                {nfe.supplier.tradeName || nfe.supplier.name || '—'}
               </div>
               <div className="text-faint text-xs">{formatDoc(nfe.supplier.document)}</div>
             </div>
@@ -319,7 +351,7 @@ export function NfeImport({ open, onClose }: { open: boolean; onClose: () => voi
           <div className="grid gap-3 sm:grid-cols-3">
             <Field label="Fornecedor" hint={supplierId ? 'Reconhecido pelo CNPJ' : 'Será cadastrado com os dados da nota'}>
               <Select value={supplierId} onChange={(e) => (setSupplierId(e.target.value), setLinkPo(''))}>
-                <option value="">+ Novo: {nfe.supplier.tradeName || nfe.supplier.name}</option>
+                <option value="">+ Novo: {nfe.supplier.tradeName || nfe.supplier.name || formatDoc(nfe.supplier.document)}</option>
                 {suppliers.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name}
@@ -385,7 +417,11 @@ export function NfeImport({ open, onClose }: { open: boolean; onClose: () => voi
                           )}
                           {l.mode === 'create' && <span className="text-muted truncate text-xs">SKU {l.item.code || '(gerado)'}</span>}
                         </div>
-                        {l.mode === 'match' && l.how && l.how !== 'manual' && <Badge tone="green" className="mt-1">por {l.how}</Badge>}
+                        {l.mode === 'match' && l.how && l.how !== 'manual' && (
+                          <Badge tone={l.how.startsWith('nome') ? 'amber' : 'green'} className="mt-1">
+                            por {l.how}
+                          </Badge>
+                        )}
                       </td>
                       <td className="text-right">
                         <Input

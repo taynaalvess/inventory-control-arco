@@ -34,6 +34,29 @@ export interface Nfe {
   supplier: { document: string; name: string; tradeName: string; phone: string; email: string };
   items: NfeItem[];
   totals: { products: number; freight: number; discount: number; ipi: number; st: number; invoice: number };
+  /** xml = leitura exata; pdf = leitura do DANFE (conferir) */
+  source?: 'xml' | 'pdf';
+  warnings?: string[];
+}
+
+/** Semelhança entre nomes de produto (0–1), por palavras em comum (Dice). */
+export function nameSimilarity(a: string, b: string) {
+  const tok = (s: string) =>
+    new Set(
+      s
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .split(' ')
+        .filter((t) => t.length > 1),
+    );
+  const A = tok(a);
+  const B = tok(b);
+  if (!A.size || !B.size) return 0;
+  let inter = 0;
+  for (const t of A) if (B.has(t)) inter++;
+  return (2 * inter) / (A.size + B.size);
 }
 
 const num = (v: string | null | undefined) => {
@@ -119,6 +142,8 @@ export function parseNfe(xml: string): Nfe {
       email: txt(emit, 'email'),
     },
     items,
+    source: 'xml',
+    warnings: [],
     totals: {
       products: num(txt(tot, 'vProd')),
       freight: num(txt(tot, 'vFrete')),
@@ -141,9 +166,20 @@ export function itemLandedTotal(it: NfeItem, includeTaxes: boolean) {
  * diferente da tributável com quantidades proporcionais.
  */
 export function suggestFactor(it: NfeItem) {
-  if (!it.qty || !it.qtyTrib || it.unit.toUpperCase() === it.unitTrib.toUpperCase()) return 1;
-  const f = it.qtyTrib / it.qty;
-  return Number.isInteger(f) && f > 1 ? f : 1;
+  // 1) a própria nota informa: 2 CX (comercial) = 24 UN (tributável)
+  if (it.qty && it.qtyTrib && it.unit.toUpperCase() !== it.unitTrib.toUpperCase()) {
+    const f = it.qtyTrib / it.qty;
+    if (Number.isInteger(f) && f > 1) return f;
+  }
+  // 2) embalagem descrita no nome: "CX C/12", "PCT COM 6", "FD 24UN", "DZ"
+  const unit = it.unit.toUpperCase();
+  if (unit === 'DZ' || unit === 'DUZIA') return 12;
+  if (/^(CX|CXA|CAIXA|PCT|PC|PT|PACOTE|FD|FARDO|DP|DISPLAY|KIT|CJ|CONJ|EMB|BL|BLISTER)$/.test(unit)) {
+    const m = it.name.toUpperCase().match(/(?:C\/|COM\s+|CX\s*|X\s*)(\d{1,4})\s*(?:UN|UND|UNID|UNIDADES|PCS?|PE[CÇ]AS)?\b|(\d{1,4})\s*(?:UN|UND|UNID|UNIDADES|PCS|PE[CÇ]AS)\b/);
+    const f = Number(m?.[1] ?? m?.[2]);
+    if (Number.isInteger(f) && f > 1 && f <= 1000) return f;
+  }
+  return 1;
 }
 
 export const onlyDigits = (s: string) => s.replace(/\D/g, '');
